@@ -25,6 +25,7 @@ type Option struct {
 	CodecType   codec.Type
 }
 
+// DefaultOption 使用默认的Option
 var DefaultOption = &Option{
 	MagicNumber: MagicNumber,
 	CodecType:   codec.JobType,
@@ -52,7 +53,7 @@ func (server *Server) Accept(lis net.Listener) {
 }
 
 /*
-ServeConn 先使用json.NewDecoder 反序列化得到 Option 实例
+ServeConn 先使用 json.NewDecoder 反序列化得到 Option 实例
 再检查 MagicNumber 和 CodeType 的值是否正确，
 再根据 CodeType 得到对应的消息编解码器，
 最后交给 serverCodec 处理
@@ -75,6 +76,7 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Println("invalid codec type")
 		return
 	}
+	fmt.Println("22222")
 	server.serveCodec(f(conn))
 }
 
@@ -87,6 +89,7 @@ var invalidRequest = struct{}{}
 */
 func (server *Server) serveCodec(cc codec.Codec) {
 	sending := new(sync.Mutex)
+	fmt.Println("#3333")
 	wg := new(sync.WaitGroup)
 	for {
 		req, err := server.readRequest(cc)
@@ -100,6 +103,7 @@ func (server *Server) serveCodec(cc codec.Codec) {
 		}
 		wg.Add(1)
 		// 使用了协程并发执行请求, 但是回复请求的报文必须是逐个发送的
+		fmt.Println("6")
 		go server.handleRequest(cc, req, sending, wg)
 	}
 	wg.Wait()
@@ -111,6 +115,7 @@ type request struct {
 	argv, replyv reflect.Value
 }
 
+// 读取请求头信息, 用 ReadHeader 方法来填充 h
 func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	var h codec.Header
 	if err := cc.ReadHeader(&h); err != nil {
@@ -122,12 +127,14 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	return &h, nil
 }
 
+// 读取完整的请求, 包括请求头和请求体
 func (server *Server) readRequest(cc codec.Codec) (*request, error) {
 	h, err := server.readRequestHeader(cc)
 	if err != nil {
 		return nil, err
 	}
 	req := &request{h: h}
+	//fmt.Println("head = ", req.h)
 	req.argv = reflect.New(reflect.TypeOf(""))
 	if err = cc.ReadBody(req.argv.Interface()); err != nil {
 		log.Println(err)
@@ -140,14 +147,16 @@ func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interfa
 	defer sending.Unlock()
 
 	if err := cc.Write(h, body); err != nil {
-		log.Println(err)
+		log.Println("err ====", err)
 	}
 }
 
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Println(req.h, req.argv.Elem())
+	//log.Println(req.h, req.argv.Elem())
+	// 使用 reflect.ValueOf () 函数将 interface {} 转成 reflect.Value 类型
 	req.replyv = reflect.ValueOf(fmt.Sprintf("get resp %d", req.h.Sequence))
+
 	server.sendResponse(cc, req.h, req.replyv.Interface(), sending)
 }
 
