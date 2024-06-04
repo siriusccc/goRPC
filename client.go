@@ -130,72 +130,6 @@ func (client *Client) receive() {
 	client.terminateCall(err)
 }
 
-// NewClient 先完成协议交换：把 Option 配置信息发送给服务端
-// 再根据 Option 中的编解码方式，创建子协程调用 receive
-func NewClient(conn net.Conn, opt *Option) (*Client, error) {
-	f := codec.NewCodecFuncMap[opt.CodecType]
-	if f == nil {
-		err := fmt.Errorf("codec type error %s", opt.CodecType)
-		log.Println(err)
-		return nil, err
-	}
-
-	if err := json.NewEncoder(conn).Encode(opt); err != nil {
-		log.Println(err)
-		_ = conn.Close()
-		return nil, err
-	}
-	return NewClientCode(f(conn), opt), nil
-}
-
-func NewClientCode(codec codec.Codec, opt *Option) *Client {
-	client := &Client{
-		opt:      opt,
-		cc:       codec,
-		pending:  make(map[uint64]*Call),
-		Sequence: 1,
-	}
-	go client.receive()
-	return client
-}
-
-// 解析 option 参数
-func parseOptions(opts ...*Option) (*Option, error) {
-	if len(opts) == 0 || opts[0] == nil {
-		return DefaultOption, nil
-	}
-	if len(opts) != 1 {
-		return nil, errors.New("too many options")
-	}
-	opt := opts[0]
-	opt.MagicNumber = DefaultOption.MagicNumber
-	if opt.CodecType == "" {
-		opt.CodecType = DefaultOption.CodecType
-	}
-	log.Println(opt)
-	log.Println(opt.CodecType)
-	log.Println(opt.MagicNumber)
-	return opt, nil
-}
-
-func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
-	log.Println("start dail")
-	opt, err := parseOptions(opts...)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := net.Dial(network, addr)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			_ = conn.Close()
-		}
-	}()
-	return NewClient(conn, opt)
-}
-
 // 实现发送请求
 func (client *Client) send(call *Call) {
 	client.sending.Lock()
@@ -243,4 +177,69 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
 	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
+}
+
+// 解析 option 参数
+func parseOptions(opts ...*Option) (*Option, error) {
+	if len(opts) == 0 || opts[0] == nil {
+		return DefaultOption, nil
+	}
+	if len(opts) != 1 {
+		return nil, errors.New("too many options")
+	}
+
+	opt := opts[0]
+	opt.MagicNumber = DefaultOption.MagicNumber
+	if opt.CodecType == "" {
+		opt.CodecType = DefaultOption.CodecType
+	}
+	return opt, nil
+}
+
+func NewClientCode(codec codec.Codec, opt *Option) *Client {
+	client := &Client{
+		opt:      opt,
+		cc:       codec,
+		pending:  make(map[uint64]*Call),
+		Sequence: 1,
+	}
+	go client.receive()
+	return client
+}
+
+// NewClient 先完成协议交换：把 Option 配置信息发送给服务端 conn
+// 再根据 Option 中的编解码方式，创建子协程调用 receive
+func NewClient(conn net.Conn, opt *Option) (*Client, error) {
+	f := codec.NewCodecFuncMap[opt.CodecType]
+	if f == nil {
+		err := fmt.Errorf("codec type error %s", opt.CodecType)
+		log.Println(err)
+		return nil, err
+	}
+
+	// 使用 JSON 编码器将配置选项 opt 编码，并发送到网络连接 conn
+	if err := json.NewEncoder(conn).Encode(opt); err != nil {
+		log.Println(err)
+		_ = conn.Close()
+		return nil, err
+	}
+	return NewClientCode(f(conn), opt), nil
+}
+
+func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
+	log.Println("start dail")
+	opt, err := parseOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = conn.Close()
+		}
+	}()
+	return NewClient(conn, opt)
 }

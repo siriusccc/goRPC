@@ -60,13 +60,12 @@ ServeConn 先使用 json.NewDecoder 反序列化得到 Option 实例
 最后交给 serverCodec 处理
 */
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
-	//defer func(conn io.ReadWriteCloser) {
-	//	err := conn.Close()
-	//	if err != nil {
-	//		log.Println("close conn")
-	//	}
-	//}(conn)
-	defer func() { _ = conn.Close() }()
+	defer func(conn io.ReadWriteCloser) {
+		err := conn.Close()
+		if err != nil {
+			log.Println("close conn")
+		}
+	}(conn)
 
 	var opt Option
 
@@ -84,8 +83,9 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Println("invalid codec type")
 		return
 	}
-	//code := f(conn)
-	server.serveCodec(f(conn))
+	// 根据指定的编解码器类型创建一个新的编解码器实例
+	code := f(conn)
+	server.serveCodec(code)
 }
 
 var invalidRequest = struct{}{}
