@@ -40,6 +40,7 @@ func NewServer() *Server {
 // DefaultServer 默认的 Server 实例
 var DefaultServer = NewServer()
 
+// Accept 让服务器持续监听一个网络接口（net.Listener）等待新的连接
 func (server *Server) Accept(lis net.Listener) {
 	// for 循环等待 socket 连接建立, 并开启子协程处理
 	for {
@@ -59,10 +60,17 @@ ServeConn 先使用 json.NewDecoder 反序列化得到 Option 实例
 最后交给 serverCodec 处理
 */
 func (server *Server) ServeConn(conn io.ReadWriteCloser) {
+	//defer func(conn io.ReadWriteCloser) {
+	//	err := conn.Close()
+	//	if err != nil {
+	//		log.Println("close conn")
+	//	}
+	//}(conn)
 	defer func() { _ = conn.Close() }()
 
 	var opt Option
 
+	// 读取 JSON 编码的数据，并将其解码到 opt 中
 	if err := json.NewDecoder(conn).Decode(&opt); err != nil {
 		log.Println(err)
 		return
@@ -76,7 +84,7 @@ func (server *Server) ServeConn(conn io.ReadWriteCloser) {
 		log.Println("invalid codec type")
 		return
 	}
-	fmt.Println("22222")
+	//code := f(conn)
 	server.serveCodec(f(conn))
 }
 
@@ -89,7 +97,7 @@ var invalidRequest = struct{}{}
 */
 func (server *Server) serveCodec(cc codec.Codec) {
 	sending := new(sync.Mutex)
-	fmt.Println("#3333")
+	// 确保在关闭编解码器之前所有的请求都已经被完全处理。
 	wg := new(sync.WaitGroup)
 	for {
 		req, err := server.readRequest(cc)
@@ -103,7 +111,7 @@ func (server *Server) serveCodec(cc codec.Codec) {
 		}
 		wg.Add(1)
 		// 使用了协程并发执行请求, 但是回复请求的报文必须是逐个发送的
-		fmt.Println("6")
+		log.Println("read req success")
 		go server.handleRequest(cc, req, sending, wg)
 	}
 	wg.Wait()
@@ -119,6 +127,7 @@ type request struct {
 func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	var h codec.Header
 	if err := cc.ReadHeader(&h); err != nil {
+		log.Println(err)
 		if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
 			log.Println(err)
 		}
@@ -153,7 +162,7 @@ func (server *Server) sendResponse(cc codec.Codec, h *codec.Header, body interfa
 
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
-	//log.Println(req.h, req.argv.Elem())
+	log.Println(req.h, req.argv.Elem())
 	// 使用 reflect.ValueOf () 函数将 interface {} 转成 reflect.Value 类型
 	req.replyv = reflect.ValueOf(fmt.Sprintf("get resp %d", req.h.Sequence))
 

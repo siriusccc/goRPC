@@ -1,10 +1,9 @@
-package client
+package goRPC
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"goRPC"
 	"goRPC/codec"
 	"io"
 	"log"
@@ -15,9 +14,9 @@ import (
 type Call struct {
 	ServiceMethod string
 	Sequence      uint64
+	Error         error
 	Args          interface{}
 	Reply         interface{}
-	Error         error
 	Done          chan *Call
 }
 
@@ -29,14 +28,14 @@ func (call *Call) done() {
 // Client pending 存储未处理完的请求，键是编号，值是 Call 实例。
 type Client struct {
 	cc       codec.Codec
-	opt      *goRPC.Option
+	opt      *Option
 	sending  sync.Mutex
 	header   codec.Header
 	mu       sync.Mutex
 	Sequence uint64
 	pending  map[uint64]*Call
-	closing  bool
-	shutdown bool
+	closing  bool // 调用结束
+	shutdown bool // 服务端或客户端发生错误
 }
 
 var _ io.Closer = (*Client)(nil)
@@ -47,6 +46,7 @@ func (client *Client) Close() error {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.closing {
+		log.Println("0000")
 		return ErrShutdown
 	}
 	client.closing = true
@@ -130,9 +130,9 @@ func (client *Client) receive() {
 	client.terminateCall(err)
 }
 
-// NewClient 先完成协议交换：发送Option给服务端
-// 再根据编解码方式，创建子协程调用receive
-func NewClient(conn net.Conn, opt *goRPC.Option) (*Client, error) {
+// NewClient 先完成协议交换：把 Option 配置信息发送给服务端
+// 再根据 Option 中的编解码方式，创建子协程调用 receive
+func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
 		err := fmt.Errorf("codec type error %s", opt.CodecType)
@@ -148,12 +148,99 @@ func NewClient(conn net.Conn, opt *goRPC.Option) (*Client, error) {
 	return NewClientCode(f(conn), opt), nil
 }
 
-func NewClientCode(codec codec.Codec, opt *goRPC.Option) *Client {
-	Client := &Client{
+func NewClientCode(codec codec.Codec, opt *Option) *Client {
+	client := &Client{
 		opt:      opt,
 		cc:       codec,
 		pending:  make(map[uint64]*Call),
 		Sequence: 1,
 	}
-	return Client
+	go client.receive()
+	return client
+}
+
+// 解析 option 参数
+func parseOptions(opts ...*Option) (*Option, error) {
+	if len(opts) == 0 || opts[0] == nil {
+		return DefaultOption, nil
+	}
+	if len(opts) != 1 {
+		return nil, errors.New("too many options")
+	}
+	opt := opts[0]
+	opt.MagicNumber = DefaultOption.MagicNumber
+	if opt.CodecType == "" {
+		opt.CodecType = DefaultOption.CodecType
+	}
+	log.Println(opt)
+	log.Println(opt.CodecType)
+	log.Println(opt.MagicNumber)
+	return opt, nil
+}
+
+func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
+	log.Println("start dail")
+	opt, err := parseOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = conn.Close()
+		}
+	}()
+	return NewClient(conn, opt)
+}
+
+// 实现发送请求
+func (client *Client) send(call *Call) {
+	client.sending.Lock()
+	defer client.sending.Unlock()
+
+	seq, err := client.registerCall(call)
+	if err != nil {
+		call.Error = err
+		call.done()
+		return
+	}
+
+	client.header.ServiceMethod = call.ServiceMethod
+	client.header.Sequence = seq
+	client.header.Error = ""
+
+	if err := client.cc.Write(&client.header, call.Args); err != nil {
+		call := client.removeCall(seq)
+		if call != nil {
+			call.Error = err
+			call.done()
+		}
+	}
+}
+
+// Go 实现异步调用, 暴露给用户调用，返回一个call实例
+func (client *Client) Go(serviceMethod string, args, reply interface{}, done chan *Call) *Call {
+	if done == nil {
+		done = make(chan *Call, 10)
+	} else if cap(done) == 0 {
+		log.Panic("client don't have any done channel")
+	}
+	call := &Call{
+		ServiceMethod: serviceMethod,
+		Args:          args,
+		Reply:         reply,
+		Done:          done,
+	}
+	client.send(call)
+
+	return call
+}
+
+// Call 实现同步调用
+func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
+	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
+	return call.Error
 }
