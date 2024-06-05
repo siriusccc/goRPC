@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 type Call struct {
@@ -22,6 +23,8 @@ type Call struct {
 
 // 当调用结束时，会调用 call.done() 通知调用方，支持异步调用
 func (call *Call) done() {
+	log.Println("Call done")
+	defer log.Println("end Call done")
 	call.Done <- call
 }
 
@@ -61,6 +64,8 @@ func (client *Client) IsAvailable() bool {
 
 // 将参数 call 添加到 client.pending 中，并更新 client.seq
 func (client *Client) registerCall(call *Call) (uint64, error) {
+	log.Println("start add call")
+	defer log.Println("end add call")
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.closing || client.shutdown {
@@ -102,6 +107,8 @@ call 存在但服务端处理异常：h.Error 非空
 call 存在且服务端处理正常：读取body中的reply的值
 */
 func (client *Client) receive() {
+	log.Println("start receive")
+	defer log.Println("end receive")
 	var err error
 	for err == nil {
 		var h codec.Header
@@ -132,6 +139,8 @@ func (client *Client) receive() {
 
 // 实现发送请求
 func (client *Client) send(call *Call) {
+	log.Println("start send")
+	defer log.Println("end send")
 	client.sending.Lock()
 	defer client.sending.Unlock()
 
@@ -157,6 +166,8 @@ func (client *Client) send(call *Call) {
 
 // Go 实现异步调用, 暴露给用户调用，返回一个call实例
 func (client *Client) Go(serviceMethod string, args, reply interface{}, done chan *Call) *Call {
+	log.Println("start Go")
+	defer log.Println("end Go")
 	if done == nil {
 		done = make(chan *Call, 10)
 	} else if cap(done) == 0 {
@@ -175,6 +186,8 @@ func (client *Client) Go(serviceMethod string, args, reply interface{}, done cha
 
 // Call 实现同步调用
 func (client *Client) Call(serviceMethod string, args, reply interface{}) error {
+	log.Println("start call")
+	defer log.Println("end call")
 	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).Done
 	return call.Error
 }
@@ -203,6 +216,8 @@ func NewClientCode(codec codec.Codec, opt *Option) *Client {
 		pending:  make(map[uint64]*Call),
 		Sequence: 1,
 	}
+	log.Println("start client receive")
+	defer log.Println("end client receive")
 	go client.receive()
 	return client
 }
@@ -210,6 +225,9 @@ func NewClientCode(codec codec.Codec, opt *Option) *Client {
 // NewClient 先完成协议交换：把 Option 配置信息发送给服务端 conn
 // 再根据 Option 中的编解码方式，创建子协程调用 receive
 func NewClient(conn net.Conn, opt *Option) (*Client, error) {
+	log.Println("starting new client")
+	defer log.Println("finished new client")
+
 	f := codec.NewCodecFuncMap[opt.CodecType]
 	if f == nil {
 		err := fmt.Errorf("codec type error %s", opt.CodecType)
@@ -223,15 +241,18 @@ func NewClient(conn net.Conn, opt *Option) (*Client, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	log.Println("----")
 	return NewClientCode(f(conn), opt), nil
 }
 
 func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
 	log.Println("start dail")
+	defer log.Println("end dail")
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
+	time.Sleep(time.Second)
 	conn, err := net.Dial(network, addr)
 	if err != nil {
 		return nil, err
@@ -241,5 +262,6 @@ func Dial(network, addr string, opts ...*Option) (client *Client, err error) {
 			_ = conn.Close()
 		}
 	}()
+	log.Println("create client")
 	return NewClient(conn, opt)
 }

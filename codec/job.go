@@ -23,6 +23,8 @@ func (c *Job) ReadHeader(h *Header) error {
 }
 
 func (c *Job) ReadBody(body interface{}) error {
+	log.Println("read body")
+	defer log.Println("end read body")
 	return c.decode.Decode(body)
 }
 

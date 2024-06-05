@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"goRPC"
 	"log"
 	"net"
@@ -11,6 +10,12 @@ import (
 
 // 启动一个 TCP 服务器并监听随机分配的端口, 确保服务端端口监听成功, 客户端再发起请求
 func startServer(addr chan string) {
+	var foo Foo
+	if err := goRPC.Register(&foo); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Starting server")
+	defer log.Println("Server stopped")
 	// 监听 TCP 连接, 0 为自动分配一个可用的端口
 	l, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -19,6 +24,15 @@ func startServer(addr chan string) {
 	log.Println("Listening on", l.Addr())
 	addr <- l.Addr().String()
 	goRPC.Accept(l)
+}
+
+type Foo int
+
+type Args struct{ Num1, Num2 int }
+
+func (f Foo) Sum(args Args, reply *int) error {
+	*reply = args.Num1 + args.Num2
+	return nil
 }
 
 /*
@@ -46,12 +60,19 @@ func main() {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			args := fmt.Sprintf("gorpc req %d", i)
+			args := &Args{
+				i,
+				i * i,
+			}
 			var reply string
-			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			log.Println("~~~~~~~")
+			err := client.Call("Foo.Sum", args, &reply)
+			log.Println("*******")
+			log.Println(reply, err)
+			if err != nil {
 				log.Fatal("call error:", err)
 			}
-			log.Println(reply)
+			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)
 		}(i)
 	}
 	wg.Wait()
