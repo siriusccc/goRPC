@@ -7,11 +7,12 @@ import (
 	"log"
 )
 
+// Job 定义Job类型, 是Codec接口的一个实现, 对通过网络发送和接收的数据进行序列化和反序列化
 type Job struct {
 	conn   io.ReadWriteCloser
 	buff   *bufio.Writer
-	decode *gob.Decoder
-	encode *gob.Encoder
+	decode *gob.Decoder // gob解码器
+	encode *gob.Encoder // gob编码器
 }
 
 // 确保某个类型实现了某个接口的所有方法
@@ -49,6 +50,7 @@ func (c *Job) Close() error {
 	return c.conn.Close()
 }
 
+// NewJobCodec 创建一个新的JobCodec实例
 func NewJobCodec(conn io.ReadWriteCloser) Codec {
 	buffer := bufio.NewWriter(conn)
 	return &Job{
